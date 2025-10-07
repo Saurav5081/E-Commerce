@@ -1,48 +1,32 @@
-from flask import Flask, render_template, request, redirect, session, url_for, g
-import sqlite3
-import os
+from flask import Flask, render_template, request, redirect, session, url_for
+from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
+import os
 
 app = Flask(__name__)
 app.secret_key = 'your_secret_key'
 
-DATABASE = 'users.db'
+# Database configuration
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///ecommerce.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+db = SQLAlchemy(app)
 
-# --- Product Data ---
-products = [
-    {"id": 1, "name": "Sporty Shoe", "price": 49.99, "image": "https://via.placeholder.com/150"},
-    {"id": 2, "name": "Winter Hoodie", "price": 59.99, "image": "https://via.placeholder.com/150"},
-    {"id": 3, "name": "Backpack", "price": 39.99, "image": "https://via.placeholder.com/150"}
-]
+# Models
+class User(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), unique=True, nullable=False)
+    password = db.Column(db.String(200), nullable=False)
 
-# --- Database Helper ---
-def get_db():
-    db = getattr(g, '_database', None)
-    if db is None:
-        db = g._database = sqlite3.connect(DATABASE)
-    return db
+class Product(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(120), nullable=False)
+    price = db.Column(db.Float, nullable=False)
+    image = db.Column(db.String(250), nullable=False)
 
-@app.teardown_appcontext
-def close_connection(exception):
-    db = getattr(g, '_database', None)
-    if db is not None:
-        db.close()
-
-def init_db():
-    with app.app_context():
-        db = get_db()
-        db.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT NOT NULL UNIQUE,
-                password TEXT NOT NULL
-            );
-        """)
-        db.commit()
-
-# --- Routes ---
+# Routes
 @app.route('/')
 def index():
+    products = Product.query.all()
     return render_template('index.html', products=products)
 
 @app.route('/register', methods=['GET', 'POST'])
@@ -50,15 +34,16 @@ def register():
     error = None
     if request.method == 'POST':
         username = request.form['username']
-        password = generate_password_hash(request.form['password'])
+        password = request.form['password']
 
-        db = get_db()
-        try:
-            db.execute("INSERT INTO users (username, password) VALUES (?, ?)", (username, password))
-            db.commit()
-            return redirect(url_for('login'))
-        except sqlite3.IntegrityError:
+        if User.query.filter_by(username=username).first():
             error = "Username already exists"
+        else:
+            hashed_pw = generate_password_hash(password)
+            new_user = User(username=username, password=hashed_pw)
+            db.session.add(new_user)
+            db.session.commit()
+            return redirect(url_for('login'))
     return render_template('register.html', error=error)
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -68,12 +53,10 @@ def login():
         username = request.form['username']
         password = request.form['password']
 
-        db = get_db()
-        user = db.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
-
-        if user and check_password_hash(user[2], password):
-            session['user_id'] = user[0]
-            session['username'] = user[1]
+        user = User.query.filter_by(username=username).first()
+        if user and check_password_hash(user.password, password):
+            session['user_id'] = user.id
+            session['username'] = user.username
             return redirect(url_for('index'))
         else:
             error = "Invalid credentials"
@@ -89,14 +72,12 @@ def add_to_cart(product_id):
     if 'user_id' not in session:
         return redirect(url_for('login'))
 
-    product = next((p for p in products if p["id"] == product_id), None)
-    if not product:
-        return "Product not found", 404
+    product = Product.query.get_or_404(product_id)
+    item = {'id': product.id, 'name': product.name, 'price': product.price}
 
     if 'cart' not in session:
         session['cart'] = []
-
-    session['cart'].append(product)
+    session['cart'].append(item)
     session.modified = True
     return redirect(url_for('index'))
 
@@ -109,9 +90,19 @@ def cart():
     total = sum(item['price'] for item in cart_items)
     return render_template('cart.html', cart=cart_items, total=total)
 
-# --- Init DB ---
-if __name__ == '__main__':
-    if not os.path.exists(DATABASE):
-        init_db()
-    app.run(debug=True)
+# Command to initialize DB and insert sample products
+@app.cli.command("init-db")
+def init_db():
+    db.create_all()
+    if Product.query.count() == 0:
+        sample_products = [
+            Product(name="Sporty Shoe", price=49.99, image="https://via.placeholder.com/150"),
+            Product(name="Winter Hoodie", price=59.99, image="https://via.placeholder.com/150"),
+            Product(name="Backpack", price=39.99, image="https://via.placeholder.com/150")
+        ]
+        db.session.bulk_save_objects(sample_products)
+        db.session.commit()
+        print("Database initialized with sample products.")
+    else:
+        print("Products already exist.")
 
