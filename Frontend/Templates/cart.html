@@ -6,6 +6,13 @@
 </head>
 <body>
     <header>
+        {% if session.get('username') %}
+            <span>Welcome, {{ session['username'] }} | <a href="{{ url_for('logout') }}">Logout</a></span>
+        {% else %}
+            <a href="{{ url_for('login') }}">Login</a>
+            <a href="{{ url_for('register') }}">Register</a>
+        {% endif %}
+
         <h1>Your Cart</h1>
         <nav>
             <a href="{{ url_for('index') }}">Home</a>
@@ -16,10 +23,10 @@
         {% if cart %}
             <ul>
                 {% for item in cart %}
-                <li>{{ item.name }} - ${{ item.price }}</li>
+                    <li>{{ item.name or "Unnamed Product" }} - ${{ "%.2f"|format(item.price or 0.0) }}</li>
                 {% endfor %}
             </ul>
-            <h3>Total: ${{ total }}</h3>
+            <h3>Total: ${{ "%.2f"|format(total or 0.0) }}</h3>
         {% else %}
             <p>Your cart is empty.</p>
         {% endif %}

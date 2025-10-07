@@ -6,6 +6,13 @@
 </head>
 <body>
     <header>
+	{% if session.get('username') %}
+    		<span>Welcome, {{ session['username'] }} | <a href="{{ url_for('logout') }}">Logout</a></span>
+	{% else %}
+    		<a href="{{ url_for('login') }}">Login</a>
+    		<a href="{{ url_for('register') }}">Register</a>
+    	{% endif %}
+    
         <h1>ShopMate</h1>
         <nav>
             <a href="{{ url_for('index') }}">Home</a>
